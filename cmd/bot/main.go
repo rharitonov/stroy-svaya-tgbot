@@ -8,7 +8,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"strconv"
 	"strings"
 	"stroy-svaya-tgbot/internal/model"
 	"time"
@@ -18,7 +17,7 @@ import (
 )
 
 const (
-	WebServiceURL = "https://localhost:8080"
+	WebServiceURL = "http://localhost:8080"
 	DateFormat    = "02.01.2006"
 	GroupsCount   = 6
 )
@@ -89,7 +88,7 @@ func main() {
 }
 
 func startNewRecord(chatID int64, state *UserState) {
-	state.CurrentRecord = model.PileDrivingRecordLine{}
+	state.CurrentRecord = model.PileDrivingRecordLine{ProjectId: 1, PileFieldId: 1}
 	state.SelectionHistory = [][]string{}
 	state.AvailablePiles = getPilesToDriving()
 	if len(state.AvailablePiles) == 0 {
@@ -163,19 +162,6 @@ func showSinglePiles(chatID int64, state *UserState, piles []string) {
 	if err != nil {
 		log.Println("Ошибка при отправке сообщения:", err)
 	}
-}
-
-func extractNumberFromPile(pile string) int {
-	// Извлекаем числовую часть из номера сваи (например, "СВ-12" -> 12)
-	parts := strings.Split(pile, "-")
-	if len(parts) < 2 {
-		return 0
-	}
-	num, err := strconv.Atoi(parts[1])
-	if err != nil {
-		return 0
-	}
-	return num
 }
 
 func splitIntoGroups(piles []string, groupsCount int) [][]string {
@@ -322,8 +308,8 @@ func handleOperatorNameInput(chatID int64, state *UserState, text string) {
 	if text != "/skip" {
 		state.CurrentRecord.RecordedBy = text
 	}
-	state.WaitingFor = "additionalInfo"
-	sendMessage(chatID, "Введите дополнительную информацию (или /skip чтобы пропустить):")
+
+	sendDataToWebService(chatID, state)
 }
 
 func sendDataToWebService(chatID int64, state *UserState) {
@@ -333,7 +319,8 @@ func sendDataToWebService(chatID int64, state *UserState) {
 		return
 	}
 
-	resp, err := http.Post(WebServiceURL, "application/json", bytes.NewBuffer(jsonData))
+	url := fmt.Sprintf("%s/insertpdrline", WebServiceURL)
+	resp, err := http.Post(url, "application/json", bytes.NewBuffer(jsonData))
 	if err != nil {
 		sendMessage(chatID, "Ошибка при отправке данных на сервер: "+err.Error())
 		return
@@ -344,11 +331,26 @@ func sendDataToWebService(chatID int64, state *UserState) {
 	msg := tgbotapi.NewMessage(chatID, "")
 	msg.ReplyMarkup = tgbotapi.NewRemoveKeyboard(true)
 
-	if resp.StatusCode == http.StatusOK {
+	// dbg
+	/*
+		msg.Text = fmt.Sprint(state.CurrentRecord)
+		_, err = bot.Send(msg)
+		if err != nil {
+			log.Println("Ошибка при отправке сообщения:", err)
+		}
+		msg.Text = string(jsonData)
+		_, err = bot.Send(msg)
+		if err != nil {
+			log.Println("Ошибка при отправке сообщения:", err)
+		}
+	*/
+	// dbg
+
+	if resp.StatusCode == http.StatusCreated {
 		msg.Text = "Данные успешно отправлены!\n\n" +
 			"Номер сваи: " + state.CurrentRecord.PileNumber + "\n" +
 			"Дата забивки: " + state.CurrentRecord.StartDate.Format(DateFormat) + "\n" +
-			"Отметка верха: " + fmt.Sprintf("%.2f", state.CurrentRecord.FactPileHead) + " м"
+			"Отметка верха: " + fmt.Sprintf("%d", state.CurrentRecord.FactPileHead) + " мм"
 	} else {
 		msg.Text = "Сервер вернул ошибку: " + resp.Status
 	}
